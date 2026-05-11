@@ -1,0 +1,21 @@
+N = # measurements
+K = # unique stations
+
+Baseline performance:
+    real = 13m44.774s
+    Used TreeMap to store in sorted order
+    TC = O(NlogK)
+
+Iteration 1:
+    real = 13m26.798s
+    Used Hashmap to store in sorted order, stored in a TreeMap later for sorted order
+    TC = O(N) + O(KlogK)
+
+
+Notes:
+"Modifier 'static' is redundant for inner records" means that in Java, when you declare a record inside another class, it is automatically static by default
+
+UncheckedIOException
+    Type: UncheckedIOException is an unchecked exception because it extends RuntimeException. The compiler does not enforce handling or declaration for it.
+    Usage: It was introduced in Java 8 primarily to wrap an IOException in scenarios where checked exceptions are inconvenient, such as in Java Stream operations or lambda expressions.
+    Function: It serves to propagate an I/O error without cluttering the code with try-catch blocks or throws clauses in every method along the call stack. It still contains the original IOException as its "cause", which can be retrieved using the getCause() method if needed at a higher level of the application.

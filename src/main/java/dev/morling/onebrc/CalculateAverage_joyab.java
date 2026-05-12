@@ -81,16 +81,30 @@ public class CalculateAverage_joyab {
                 });
 
         HashMap<String, ResultRow> measurements;
+
+        long startTime = System.nanoTime();
+
         try (Stream<String> lines = Files.lines(path, StandardCharsets.UTF_8)) {
             measurements = lines
                     .map(l -> new Measurement(l))
                     // creates a Map: key = station, value = result of collector
                     .collect(groupingBy(Measurement::station, HashMap::new, collector));
-        } catch (IOException e) {
+        }
+        catch (IOException e) {
             throw new UncheckedIOException(e);
         }
 
+        long endTime = System.nanoTime();
+
         TreeMap<String, ResultRow> measurements1 = new TreeMap<>(measurements);
-        System.out.println(measurements1);
+        // System.out.println(measurements1);
+
+        long durationNs = (endTime - startTime);
+        long totalSeconds = durationNs / 1_000_000_000;
+        long minutes = totalSeconds / 60;
+        long seconds = totalSeconds % 60;
+        long millis = (durationNs / 1_000_000) % 1000;
+
+        System.out.printf("Logic only: %d min %d sec %d ms%n", minutes, seconds, millis);
     }
 }

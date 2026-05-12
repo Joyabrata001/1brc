@@ -15,5 +15,10 @@
 #  limitations under the License.
 #
 
+#$env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
+#$env:Path = "$env:JAVA_HOME\bin;$env:Path"
+
+#JAVA_OPTS="--enable-preview --add-modules jdk.incubator.vector"
+
 JAVA_OPTS=""
 java $JAVA_OPTS --class-path target/average-1.0.0-SNAPSHOT.jar dev.morling.onebrc.CalculateAverage_joyab

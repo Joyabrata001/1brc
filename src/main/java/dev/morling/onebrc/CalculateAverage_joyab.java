@@ -32,29 +32,41 @@ public class CalculateAverage_joyab {
 
     private static final String FILE = "./measurements.txt";
     private static final Path path = Paths.get(FILE);
+
+    public static final int MINUS = 45;
+    public static final int PERIOD = 46;
+    public static final int ZERO = 48;
     public static final int SEMICOLON = 59;
 
-    private record Measurement(String station, double value) {
-        private Measurement(String l) {
-            this(l.substring(0, l.indexOf(SEMICOLON)), Double.parseDouble(l.substring(l.indexOf(SEMICOLON) + 1)));
+    private static int parseTemperature(String str) {
+        boolean isNeg = str.charAt(0) == MINUS;
+        int temp = 0, n = str.length();
+        for (int i = isNeg ? 1 : 0; i < n; i++) {
+            char ch = str.charAt(i);
+
+            if (ch != PERIOD)
+                temp = temp * 10 + ch - ZERO;
+        }
+        return isNeg ? -temp : temp;
+    }
+
+    private record Measurement(String station, int value) {
+        public static Measurement of(String l) {
+            int indexOfSemicolon = l.indexOf(SEMICOLON);
+            return new Measurement(l.substring(0, indexOfSemicolon), parseTemperature(l.substring(indexOfSemicolon + 1)));
         }
     }
 
-    private record ResultRow(double min, double mean, double max) {
-
+    private record ResultRow(long min, double mean, long max) {
         public String toString() {
-            return round(min) + "/" + round(mean) + "/" + round(max);
-        }
-
-        private double round(double value) {
-            return Math.round(value * 10.0) / 10.0;
+            return (min / 10.0) + "/" + (Math.round(mean) / 10.0) + "/" + (max / 10.0);
         }
     }
 
     private static class MeasurementAggregator {
-        private double min = Double.POSITIVE_INFINITY;
-        private double max = Double.NEGATIVE_INFINITY;
-        private double sum;
+        private long min = Integer.MAX_VALUE;
+        private long max = Integer.MIN_VALUE;
+        private long sum;
         private long count;
     }
 
@@ -77,7 +89,7 @@ public class CalculateAverage_joyab {
                     return res;
                 },
                 agg -> {
-                    return new ResultRow(agg.min, (Math.round(agg.sum * 10.0) / 10.0) / agg.count, agg.max);
+                    return new ResultRow(agg.min, (double) agg.sum / agg.count, agg.max);
                 });
 
         HashMap<String, ResultRow> measurements;
@@ -86,7 +98,7 @@ public class CalculateAverage_joyab {
 
         try (Stream<String> lines = Files.lines(path, StandardCharsets.UTF_8)) {
             measurements = lines
-                    .map(l -> new Measurement(l))
+                    .map(Measurement::of)
                     // creates a Map: key = station, value = result of collector
                     .collect(groupingBy(Measurement::station, HashMap::new, collector));
         }
@@ -97,7 +109,7 @@ public class CalculateAverage_joyab {
         long endTime = System.nanoTime();
 
         TreeMap<String, ResultRow> measurements1 = new TreeMap<>(measurements);
-        // System.out.println(measurements1);
+        System.out.println(measurements1);
 
         long durationNs = (endTime - startTime);
         long totalSeconds = durationNs / 1_000_000_000;

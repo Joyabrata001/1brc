@@ -27,11 +27,19 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-# 3. Run the application
-Write-Host "--- Running implementation ---" -ForegroundColor Cyan
+## 3. Run the application
+#Write-Host "--- Running implementation ---" -ForegroundColor Cyan
+#
+## Added performance flags often needed for 1BRC
+#$JAVA_OPTS = ""
+#
+## Using 'target/classes' to see the newly compiled code immediately
+#java $JAVA_OPTS -cp "target/classes" dev.morling.onebrc.CalculateAverage_joyab
 
-# Added performance flags often needed for 1BRC
-$JAVA_OPTS = ""
+# 3. Package into a single JAR
+Write-Host "--- Packaging into JAR ---" -ForegroundColor Green
+jar --create --file=CalculateAverage_joyab.jar --main-class=dev.morling.onebrc.CalculateAverage_joyab -C target/classes .
 
-# Using 'target/classes' to see the newly compiled code immediately
-java $JAVA_OPTS -cp "target/classes" dev.morling.onebrc.CalculateAverage_joyab
+# 4. Run the application (using the JAR)
+Write-Host "--- Running from JAR ---" -ForegroundColor Cyan
+java -jar CalculateAverage_joyab.jar

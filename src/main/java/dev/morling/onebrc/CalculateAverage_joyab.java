@@ -38,22 +38,36 @@ public class CalculateAverage_joyab {
     public static final int ZERO = 48;
     public static final int SEMICOLON = 59;
 
-    private static int parseTemperature(String str) {
-        boolean isNeg = str.charAt(0) == MINUS;
-        int temp = 0, n = str.length();
-        for (int i = isNeg ? 1 : 0; i < n; i++) {
-            char ch = str.charAt(i);
-
-            if (ch != PERIOD)
-                temp = temp * 10 + ch - ZERO;
-        }
-        return isNeg ? -temp : temp;
-    }
-
     private record Measurement(String station, int value) {
         public static Measurement of(String l) {
-            int indexOfSemicolon = l.indexOf(SEMICOLON);
-            return new Measurement(l.substring(0, indexOfSemicolon), parseTemperature(l.substring(indexOfSemicolon + 1)));
+            char[] line = l.toCharArray();
+
+            int i = 0;
+
+            while (line[i] != SEMICOLON) ++i;
+
+            String city = new String(line, 0, i);
+
+            ++i;    // Skip SEMICOLON
+
+            boolean isNeg = line[i] == MINUS;
+
+            i += isNeg ? 1 : 0;
+
+            int temp = 0;
+            while (line[i] != PERIOD) {
+                temp = temp * 10 + line[i] - ZERO;
+                ++i;
+            }
+
+            ++i;    // Skip PERIOD
+
+            temp = temp * 10 + line[i] - ZERO;
+
+            if (isNeg)
+                temp = -temp;
+
+            return new Measurement(city, temp);
         }
     }
 
@@ -101,8 +115,7 @@ public class CalculateAverage_joyab {
                     .map(Measurement::of)
                     // creates a Map: key = station, value = result of collector
                     .collect(groupingBy(Measurement::station, HashMap::new, collector));
-        }
-        catch (IOException e) {
+        } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
 

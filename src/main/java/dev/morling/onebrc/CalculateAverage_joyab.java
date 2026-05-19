@@ -15,18 +15,14 @@
  */
 package dev.morling.onebrc;
 
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.TreeMap;
-import java.util.stream.Collector;
-import java.util.stream.Stream;
-
-import static java.util.stream.Collectors.groupingBy;
 
 public class CalculateAverage_joyab {
 
@@ -37,39 +33,6 @@ public class CalculateAverage_joyab {
     public static final int PERIOD = 46;
     public static final int ZERO = 48;
     public static final int SEMICOLON = 59;
-
-    private record Measurement(String station, int value) {
-        public static Measurement of(String l) {
-            char[] line = l.toCharArray();
-
-            int i = 0;
-
-            while (line[i] != SEMICOLON) ++i;
-
-            String city = new String(line, 0, i);
-
-            ++i;    // Skip SEMICOLON
-
-            boolean isNeg = line[i] == MINUS;
-
-            i += isNeg ? 1 : 0;
-
-            int temp = 0;
-            while (line[i] != PERIOD) {
-                temp = temp * 10 + line[i] - ZERO;
-                ++i;
-            }
-
-            ++i;    // Skip PERIOD
-
-            temp = temp * 10 + line[i] - ZERO;
-
-            if (isNeg)
-                temp = -temp;
-
-            return new Measurement(city, temp);
-        }
-    }
 
     private record ResultRow(long min, double mean, long max) {
         public String toString() {
@@ -85,44 +48,63 @@ public class CalculateAverage_joyab {
     }
 
     public static void main(String[] args) throws IOException {
-        Collector<Measurement, MeasurementAggregator, ResultRow> collector = Collector.of(
-                MeasurementAggregator::new,
-                (a, m) -> {
-                    a.min = Math.min(a.min, m.value);
-                    a.max = Math.max(a.max, m.value);
-                    a.sum += m.value;
-                    a.count++;
-                },
-                (agg1, agg2) -> {
-                    var res = new MeasurementAggregator();
-                    res.min = Math.min(agg1.min, agg2.min);
-                    res.max = Math.max(agg1.max, agg2.max);
-                    res.sum = agg1.sum + agg2.sum;
-                    res.count = agg1.count + agg2.count;
-
-                    return res;
-                },
-                agg -> {
-                    return new ResultRow(agg.min, (double) agg.sum / agg.count, agg.max);
-                });
-
-        HashMap<String, ResultRow> measurements;
-
         long startTime = System.nanoTime();
 
-        try (Stream<String> lines = Files.lines(path, StandardCharsets.UTF_8)) {
-            measurements = lines
-                    .map(Measurement::of)
-                    // creates a Map: key = station, value = result of collector
-                    .collect(groupingBy(Measurement::station, HashMap::new, collector));
+        HashMap<String, MeasurementAggregator> mpp = new HashMap<>();
+
+        try (BufferedReader br = new BufferedReader(new FileReader(path.toFile()))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                int i = 0;
+
+                while (line.charAt(i) != SEMICOLON) ++i;
+
+                String city = line.substring(0, i);
+
+                ++i;    // Skip SEMICOLON
+
+                boolean isNeg = line.charAt(i) == MINUS;
+
+                i += isNeg ? 1 : 0;
+
+                int temp = 0;
+                while (line.charAt(i) != PERIOD) {
+                    temp = temp * 10 + line.charAt(i) - ZERO;
+                    ++i;
+                }
+
+                ++i;    // Skip PERIOD
+
+                temp = temp * 10 + line.charAt(i) - ZERO;
+
+                if (isNeg)
+                    temp = -temp;
+
+                MeasurementAggregator agg = mpp.get(city);
+
+                if (agg == null) {
+                    agg = new MeasurementAggregator();
+                    mpp.put(city, agg);
+                }
+
+                agg.min = Math.min(agg.min, temp);
+                agg.max = Math.max(agg.max, temp);
+                agg.sum += temp;
+                ++agg.count;
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
 
+        TreeMap<String, ResultRow> measurements = new TreeMap<>();
+        mpp.forEach((city, agg) -> {
+            double mean = (double) agg.sum / agg.count;
+            measurements.put(city, new ResultRow(agg.min, mean, agg.max));
+        });
+
         long endTime = System.nanoTime();
 
-        TreeMap<String, ResultRow> measurements1 = new TreeMap<>(measurements);
-        System.out.println(measurements1);
+        System.out.println(measurements);
 
         long durationNs = (endTime - startTime);
         long totalSeconds = durationNs / 1_000_000_000;

@@ -20,7 +20,7 @@ $JAR_NAME = "CalculateAverage_joyab.jar"
 $MEASUREMENTS_FILE = "measurements.txt"
 
 # JFR output
-$JFR_FILE = "recording.jfr"
+$JFR_FILE = "recording_buffered_reader.jfr"
 
 # ---------------------------------------------------------
 # Clean previous JFR

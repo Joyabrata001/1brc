@@ -15,10 +15,8 @@
  */
 package dev.morling.onebrc;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.UncheckedIOException;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
@@ -52,7 +50,7 @@ public class CalculateAverage_joyab {
 
         HashMap<String, MeasurementAggregator> mpp = new HashMap<>();
 
-        try (BufferedReader br = new BufferedReader(new FileReader(path.toFile()))) {
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(path.toFile()), StandardCharsets.UTF_8))) {
             String line;
             while ((line = br.readLine()) != null) {
                 int i = 0;
@@ -77,8 +75,7 @@ public class CalculateAverage_joyab {
 
                 temp = temp * 10 + line.charAt(i) - ZERO;
 
-                if (isNeg)
-                    temp = -temp;
+                if (isNeg) temp = -temp;
 
                 MeasurementAggregator agg = mpp.get(city);
 

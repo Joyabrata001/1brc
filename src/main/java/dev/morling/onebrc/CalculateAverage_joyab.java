@@ -15,8 +15,9 @@
  */
 package dev.morling.onebrc;
 
-import java.io.*;
-import java.nio.charset.StandardCharsets;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
@@ -31,6 +32,8 @@ public class CalculateAverage_joyab {
     public static final int PERIOD = 46;
     public static final int ZERO = 48;
     public static final int SEMICOLON = 59;
+    public static final int BUFFERSIZE = 1 << 20;
+    public static final int NEWLINE = 10;
 
     private record ResultRow(long min, double mean, long max) {
         public String toString() {
@@ -50,44 +53,69 @@ public class CalculateAverage_joyab {
 
         HashMap<String, MeasurementAggregator> mpp = new HashMap<>();
 
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(path.toFile()), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = br.readLine()) != null) {
+        try (FileInputStream fis = new FileInputStream(path.toFile())) {
+            byte[] b = new byte[BUFFERSIZE];
+            int carryOver = 0;
+            int bytesRead;
+
+            while ((bytesRead = fis.read(b, carryOver, BUFFERSIZE - carryOver)) != -1) {
+                int totBytesRead = bytesRead + carryOver;
+
+                // Find idx of last complete record (last NEWLINE)
+                int lastNewLine = totBytesRead - 1;
+                while (lastNewLine >= 0 && b[lastNewLine] != NEWLINE) --lastNewLine;
+
                 int i = 0;
 
-                while (line.charAt(i) != SEMICOLON) ++i;
+                while (i <= lastNewLine) {
+                    // Parse station
+                    int stationStartIdx = i;
+                    while (b[i] != SEMICOLON) ++i;
 
-                String city = line.substring(0, i);
+                    String station = new String(b, stationStartIdx, i - stationStartIdx);
 
-                ++i;    // Skip SEMICOLON
+                    ++i;    // Skip SEMICOLON
 
-                boolean isNeg = line.charAt(i) == MINUS;
+                    // Parse temperature
+                    boolean isNeg = (b[i] == MINUS);
 
-                i += isNeg ? 1 : 0;
+                    i += isNeg ? 1 : 0;
 
-                int temp = 0;
-                while (line.charAt(i) != PERIOD) {
-                    temp = temp * 10 + line.charAt(i) - ZERO;
-                    ++i;
+                    int temp = 0;
+                    while (b[i] != PERIOD) {
+                        temp = temp * 10 + b[i] - ZERO;
+                        ++i;
+                    }
+
+                    ++i;    // Skip PERIOD
+
+                    temp = temp * 10 + b[i] - ZERO;
+
+                    if (isNeg) temp = -temp;
+
+                    // Aggregate
+                    MeasurementAggregator agg = mpp.get(station);
+
+                    if (agg == null) {
+                        agg = new MeasurementAggregator();
+                        mpp.put(station, agg);
+                    }
+
+                    agg.min = Math.min(agg.min, temp);
+                    agg.max = Math.max(agg.max, temp);
+                    agg.sum += temp;
+                    ++agg.count;
+
+                    // Move to newline
+                    while (b[i] != NEWLINE) ++i;
+
+                    ++i;    // Skip newline
                 }
 
-                ++i;    // Skip PERIOD
-
-                temp = temp * 10 + line.charAt(i) - ZERO;
-
-                if (isNeg) temp = -temp;
-
-                MeasurementAggregator agg = mpp.get(city);
-
-                if (agg == null) {
-                    agg = new MeasurementAggregator();
-                    mpp.put(city, agg);
-                }
-
-                agg.min = Math.min(agg.min, temp);
-                agg.max = Math.max(agg.max, temp);
-                agg.sum += temp;
-                ++agg.count;
+                // Recalculate carryOver and make copy of leftover
+                carryOver = totBytesRead - (lastNewLine + 1);
+                if (carryOver > 0)
+                    System.arraycopy(b, lastNewLine + 1, b, 0, carryOver);
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);

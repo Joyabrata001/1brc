@@ -23,6 +23,10 @@ import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.TreeMap;
 
+// Using FileInputStream and changing buffer size from 1MB - 2MB - 4MB - 8MB - 16MB
+// 2MB seems like magic figure (allocated classes = 56 vs 57 for other buffer sizes)
+// 1MB - 4MB: 1.5 to 2 mintues, it gets progressively worse to upto 4.5 minutes for 16MB
+
 public class CalculateAverage_joyab {
 
     private static final String FILE = "./measurements.txt";
@@ -32,7 +36,7 @@ public class CalculateAverage_joyab {
     public static final int PERIOD = 46;
     public static final int ZERO = 48;
     public static final int SEMICOLON = 59;
-    public static final int BUFFERSIZE = 1 << 20;
+    public static final int BUFFERSIZE = 1 << 24;
     public static final int NEWLINE = 10;
 
     private record ResultRow(long min, double mean, long max) {

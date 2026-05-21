@@ -36,7 +36,7 @@ public class CalculateAverage_joyab {
     public static final int PERIOD = 46;
     public static final int ZERO = 48;
     public static final int SEMICOLON = 59;
-    public static final int BUFFERSIZE = 1 << 24;
+    public static final int BUFFERSIZE = 1 << 21;
     public static final int NEWLINE = 10;
 
     private record ResultRow(long min, double mean, long max) {

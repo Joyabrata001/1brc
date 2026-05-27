@@ -23,9 +23,11 @@ import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.TreeMap;
 
-// Using FileInputStream and changing buffer size from 1MB - 2MB - 4MB - 8MB - 16MB
-// 2MB seems like magic figure (allocated classes = 56 vs 57 for other buffer sizes)
-// 1MB - 4MB: 1.5 to 2 mintues, it gets progressively worse to upto 4.5 minutes for 16MB
+// New issues: Integer boxing
+// Why Allocated Classes Score Worsened
+// Allocation when using String as HashMap key: Single, predictable, making it favourable for JIT inlining
+// Allocation when using CustomHash integer as HashMap key: Conditional, inside HashMap lookup, making harder to scalar-replace
+//
 
 public class CalculateAverage_joyab {
 
@@ -55,7 +57,8 @@ public class CalculateAverage_joyab {
     public static void main(String[] args) throws IOException {
         long startTime = System.nanoTime();
 
-        HashMap<String, MeasurementAggregator> mpp = new HashMap<>();
+        HashMap<Integer, MeasurementAggregator> mpp1 = new HashMap<>();
+        HashMap<Integer, String> mpp2 = new HashMap<>();
 
         try (FileInputStream fis = new FileInputStream(path.toFile())) {
             byte[] b = new byte[BUFFERSIZE];
@@ -73,16 +76,20 @@ public class CalculateAverage_joyab {
 
                 while (i <= lastNewLine) {
                     // Parse station
+                    int station = 0;
                     int stationStartIdx = i;
-                    while (b[i] != SEMICOLON) ++i;
+                    while (b[i] != SEMICOLON) {
+                        station = 31 * station + b[i];
+                        ++i;
+                    }
 
-                    String station = new String(b, stationStartIdx, i - stationStartIdx);
+                    if (mpp2.get(station) == null)
+                        mpp2.put(station, new String(b, stationStartIdx, i - stationStartIdx));
 
                     ++i;    // Skip SEMICOLON
 
                     // Parse temperature
                     boolean isNeg = (b[i] == MINUS);
-
                     i += isNeg ? 1 : 0;
 
                     int temp = 0;
@@ -98,11 +105,11 @@ public class CalculateAverage_joyab {
                     if (isNeg) temp = -temp;
 
                     // Aggregate
-                    MeasurementAggregator agg = mpp.get(station);
+                    MeasurementAggregator agg = mpp1.get(station);
 
                     if (agg == null) {
                         agg = new MeasurementAggregator();
-                        mpp.put(station, agg);
+                        mpp1.put(station, agg);
                     }
 
                     agg.min = Math.min(agg.min, temp);
@@ -118,17 +125,16 @@ public class CalculateAverage_joyab {
 
                 // Recalculate carryOver and make copy of leftover
                 carryOver = totBytesRead - (lastNewLine + 1);
-                if (carryOver > 0)
-                    System.arraycopy(b, lastNewLine + 1, b, 0, carryOver);
+                if (carryOver > 0) System.arraycopy(b, lastNewLine + 1, b, 0, carryOver);
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
 
         TreeMap<String, ResultRow> measurements = new TreeMap<>();
-        mpp.forEach((city, agg) -> {
+        mpp1.forEach((station, agg) -> {
             double mean = (double) agg.sum / agg.count;
-            measurements.put(city, new ResultRow(agg.min, mean, agg.max));
+            measurements.put(mpp2.get(station), new ResultRow(agg.min, mean, agg.max));
         });
 
         long endTime = System.nanoTime();

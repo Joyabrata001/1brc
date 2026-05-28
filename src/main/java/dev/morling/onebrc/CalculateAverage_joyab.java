@@ -23,11 +23,8 @@ import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.TreeMap;
 
-// New issues: Integer boxing
-// Why Allocated Classes Score Worsened
-// Allocation when using String as HashMap key: Single, predictable, making it favourable for JIT inlining
-// Allocation when using CustomHash integer as HashMap key: Conditional, inside HashMap lookup, making harder to scalar-replace
-//
+// Reduction to 1 HashMap from 2
+// Time takes: ~2 mins
 
 public class CalculateAverage_joyab {
 
@@ -48,17 +45,22 @@ public class CalculateAverage_joyab {
     }
 
     private static class MeasurementAggregator {
-        private long min = Integer.MAX_VALUE;
-        private long max = Integer.MIN_VALUE;
+        private String station;
+
+        private long min = Long.MAX_VALUE;
+        private long max = Long.MIN_VALUE;
         private long sum;
         private long count;
+
+        MeasurementAggregator(String station) {
+            this.station = station;
+        }
     }
 
     public static void main(String[] args) throws IOException {
         long startTime = System.nanoTime();
 
-        HashMap<Integer, MeasurementAggregator> mpp1 = new HashMap<>();
-        HashMap<Integer, String> mpp2 = new HashMap<>();
+        HashMap<Integer, MeasurementAggregator> mpp = new HashMap<>();
 
         try (FileInputStream fis = new FileInputStream(path.toFile())) {
             byte[] b = new byte[BUFFERSIZE];
@@ -76,15 +78,20 @@ public class CalculateAverage_joyab {
 
                 while (i <= lastNewLine) {
                     // Parse station
-                    int station = 0;
+                    Integer hash = 0;
                     int stationStartIdx = i;
                     while (b[i] != SEMICOLON) {
-                        station = 31 * station + b[i];
+                        hash = 31 * hash + b[i];
                         ++i;
                     }
 
-                    if (mpp2.get(station) == null)
-                        mpp2.put(station, new String(b, stationStartIdx, i - stationStartIdx));
+                    MeasurementAggregator agg = mpp.get(hash);
+
+                    if (agg == null) {
+                        String station = new String(b, stationStartIdx, i - stationStartIdx);
+                        agg = new MeasurementAggregator(station);
+                        mpp.put(hash, agg);
+                    }
 
                     ++i;    // Skip SEMICOLON
 
@@ -105,13 +112,6 @@ public class CalculateAverage_joyab {
                     if (isNeg) temp = -temp;
 
                     // Aggregate
-                    MeasurementAggregator agg = mpp1.get(station);
-
-                    if (agg == null) {
-                        agg = new MeasurementAggregator();
-                        mpp1.put(station, agg);
-                    }
-
                     agg.min = Math.min(agg.min, temp);
                     agg.max = Math.max(agg.max, temp);
                     agg.sum += temp;
@@ -132,9 +132,9 @@ public class CalculateAverage_joyab {
         }
 
         TreeMap<String, ResultRow> measurements = new TreeMap<>();
-        mpp1.forEach((station, agg) -> {
+        mpp.forEach((hash, agg) -> {
             double mean = (double) agg.sum / agg.count;
-            measurements.put(mpp2.get(station), new ResultRow(agg.min, mean, agg.max));
+            measurements.put(agg.station, new ResultRow(agg.min, mean, agg.max));
         });
 
         long endTime = System.nanoTime();

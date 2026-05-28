@@ -24,7 +24,7 @@ import java.util.HashMap;
 import java.util.TreeMap;
 
 // Reduction to 1 HashMap from 2
-// Time takes: ~2 mins
+// Time takes: ~3 mins
 
 public class CalculateAverage_joyab {
 

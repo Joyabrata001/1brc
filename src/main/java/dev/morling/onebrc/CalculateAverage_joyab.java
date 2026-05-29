@@ -25,8 +25,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.TreeMap;
 
-// MeasurementAggregator now uses byte[] for storing station name
-// Time takes: ~1.5 mins
+// Time taken: ~1.5 mins
 
 public class CalculateAverage_joyab {
 
@@ -46,9 +45,22 @@ public class CalculateAverage_joyab {
         }
     }
 
-    private static class MeasurementAggregator {
-        private byte[] station;
+    private record StationKey(byte[] bytes, int hash) {
 
+        @Override
+            public int hashCode() {
+                return this.hash;
+            }
+
+            @Override
+            public boolean equals(Object obj) {
+                if (this == obj) return true;
+                if (!(obj instanceof StationKey other)) return false;
+                return Arrays.equals(this.bytes, other.bytes);
+            }
+        }
+
+    private static class MeasurementAggregator {
         private long min = Long.MAX_VALUE;
         private long max = Long.MIN_VALUE;
         private long sum;
@@ -58,7 +70,7 @@ public class CalculateAverage_joyab {
     public static void main(String[] args) throws IOException {
         long startTime = System.nanoTime();
 
-        HashMap<Integer, MeasurementAggregator> mpp = new HashMap<>();
+        HashMap<StationKey, MeasurementAggregator> mpp = new HashMap<>();
 
         try (FileInputStream fis = new FileInputStream(path.toFile())) {
             byte[] b = new byte[BUFFERSIZE];
@@ -83,12 +95,14 @@ public class CalculateAverage_joyab {
                         ++i;
                     }
 
-                    MeasurementAggregator agg = mpp.get(hash);
+                    byte[] stationBytes = Arrays.copyOfRange(b, stationStartIdx, i);
+                    StationKey lookupKey = new StationKey(stationBytes, hash);
+
+                    MeasurementAggregator agg = mpp.get(lookupKey);
 
                     if (agg == null) {
                         agg = new MeasurementAggregator();
-                        agg.station = Arrays.copyOfRange(b, stationStartIdx, i);
-                        mpp.put(hash, agg);
+                        mpp.put(lookupKey, agg);
                     }
 
                     ++i;    // Skip SEMICOLON
@@ -127,9 +141,9 @@ public class CalculateAverage_joyab {
         }
 
         TreeMap<String, ResultRow> measurements = new TreeMap<>();
-        mpp.forEach((hash, agg) -> {
+        mpp.forEach((key, agg) -> {
             double mean = (double) agg.sum / agg.count;
-            measurements.put(new String(agg.station, StandardCharsets.UTF_8), new ResultRow(agg.min, mean, agg.max));
+            measurements.put(new String(key.bytes, StandardCharsets.UTF_8), new ResultRow(agg.min, mean, agg.max));
         });
 
         long endTime = System.nanoTime();

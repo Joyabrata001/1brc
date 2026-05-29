@@ -18,13 +18,15 @@ package dev.morling.onebrc;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.TreeMap;
 
-// Reduction to 1 HashMap from 2
-// Time takes: ~3 mins
+// MeasurementAggregator now uses byte[] for storing station name
+// Time takes: ~1.5 mins
 
 public class CalculateAverage_joyab {
 
@@ -45,16 +47,12 @@ public class CalculateAverage_joyab {
     }
 
     private static class MeasurementAggregator {
-        private String station;
+        private byte[] station;
 
         private long min = Long.MAX_VALUE;
         private long max = Long.MIN_VALUE;
         private long sum;
         private long count;
-
-        MeasurementAggregator(String station) {
-            this.station = station;
-        }
     }
 
     public static void main(String[] args) throws IOException {
@@ -78,7 +76,7 @@ public class CalculateAverage_joyab {
 
                 while (i <= lastNewLine) {
                     // Parse station
-                    Integer hash = 0;
+                    int hash = 0;
                     int stationStartIdx = i;
                     while (b[i] != SEMICOLON) {
                         hash = 31 * hash + b[i];
@@ -88,8 +86,8 @@ public class CalculateAverage_joyab {
                     MeasurementAggregator agg = mpp.get(hash);
 
                     if (agg == null) {
-                        String station = new String(b, stationStartIdx, i - stationStartIdx);
-                        agg = new MeasurementAggregator(station);
+                        agg = new MeasurementAggregator();
+                        agg.station = Arrays.copyOfRange(b, stationStartIdx, i);
                         mpp.put(hash, agg);
                     }
 
@@ -112,15 +110,12 @@ public class CalculateAverage_joyab {
                     if (isNeg) temp = -temp;
 
                     // Aggregate
-                    agg.min = Math.min(agg.min, temp);
-                    agg.max = Math.max(agg.max, temp);
+                    if (temp < agg.min) agg.min = temp;
+                    if (temp > agg.max) agg.max = temp;
                     agg.sum += temp;
                     ++agg.count;
 
-                    // Move to newline
-                    while (b[i] != NEWLINE) ++i;
-
-                    ++i;    // Skip newline
+                    i += 2;
                 }
 
                 // Recalculate carryOver and make copy of leftover
@@ -134,7 +129,7 @@ public class CalculateAverage_joyab {
         TreeMap<String, ResultRow> measurements = new TreeMap<>();
         mpp.forEach((hash, agg) -> {
             double mean = (double) agg.sum / agg.count;
-            measurements.put(agg.station, new ResultRow(agg.min, mean, agg.max));
+            measurements.put(new String(agg.station, StandardCharsets.UTF_8), new ResultRow(agg.min, mean, agg.max));
         });
 
         long endTime = System.nanoTime();

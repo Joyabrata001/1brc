@@ -21,11 +21,12 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.TreeMap;
 
 // Time taken: ~1 - 2 mins
+// Allocated classes drops from approx 75 to 2
+// GC pressure reduces
 
 public class CalculateAverage_joyab {
 
@@ -45,7 +46,11 @@ public class CalculateAverage_joyab {
         }
     }
 
-    private record StationKey(byte[] bytes, int offset, int len, int hash) {
+    private static class StationKey {
+        byte[] bytes;
+        int offset;
+        int len;
+        int hash;
 
         @Override
         public int hashCode() {
@@ -62,6 +67,13 @@ public class CalculateAverage_joyab {
                 if (this.bytes[offset + i] != other.bytes[other.offset + i]) return false;
             }
             return true;
+        }
+
+        public StationKey(byte[] bytes, int offset, int len, int hash) {
+            this.bytes = bytes;
+            this.offset = offset;
+            this.len = len;
+            this.hash = hash;
         }
     }
 
@@ -82,6 +94,9 @@ public class CalculateAverage_joyab {
             int carryOver = 0;
             int bytesRead;
 
+            StationKey lookupKey = new StationKey(b, -1, -1, -1);
+            lookupKey.bytes = b;
+
             while ((bytesRead = fis.read(b, carryOver, BUFFERSIZE - carryOver)) != -1) {
                 int totBytesRead = bytesRead + carryOver;
 
@@ -100,12 +115,15 @@ public class CalculateAverage_joyab {
                         ++i;
                     }
 
-                    StationKey lookupKey = new StationKey(b, stationStartIdx, i - stationStartIdx, hash);
+                    lookupKey.offset = stationStartIdx;
+                    lookupKey.len = i - stationStartIdx;
+                    lookupKey.hash = hash;
 
                     MeasurementAggregator agg = mpp.get(lookupKey);
 
                     if (agg == null) {
-                        byte[] stationCopy = Arrays.copyOfRange(b, stationStartIdx, i);
+                        byte[] stationCopy = new byte[i - stationStartIdx];
+                        System.arraycopy(b, stationStartIdx, stationCopy, 0, i - stationStartIdx);
                         StationKey storedKey = new StationKey(stationCopy, 0, i - stationStartIdx, hash);
 
                         agg = new MeasurementAggregator();

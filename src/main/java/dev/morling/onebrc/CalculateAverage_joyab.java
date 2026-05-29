@@ -25,7 +25,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.TreeMap;
 
-// Time taken: ~1.5 mins
+// Time taken: ~1 - 2 mins
 
 public class CalculateAverage_joyab {
 
@@ -45,20 +45,25 @@ public class CalculateAverage_joyab {
         }
     }
 
-    private record StationKey(byte[] bytes, int hash) {
+    private record StationKey(byte[] bytes, int offset, int len, int hash) {
 
         @Override
-            public int hashCode() {
-                return this.hash;
-            }
-
-            @Override
-            public boolean equals(Object obj) {
-                if (this == obj) return true;
-                if (!(obj instanceof StationKey other)) return false;
-                return Arrays.equals(this.bytes, other.bytes);
-            }
+        public int hashCode() {
+            return this.hash;
         }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof StationKey other)) return false;
+            if (this.len != other.len) return false;
+
+            for (int i = 0; i < len; i++) {
+                if (this.bytes[offset + i] != other.bytes[other.offset + i]) return false;
+            }
+            return true;
+        }
+    }
 
     private static class MeasurementAggregator {
         private long min = Long.MAX_VALUE;
@@ -95,41 +100,53 @@ public class CalculateAverage_joyab {
                         ++i;
                     }
 
-                    byte[] stationBytes = Arrays.copyOfRange(b, stationStartIdx, i);
-                    StationKey lookupKey = new StationKey(stationBytes, hash);
+                    StationKey lookupKey = new StationKey(b, stationStartIdx, i - stationStartIdx, hash);
 
                     MeasurementAggregator agg = mpp.get(lookupKey);
 
                     if (agg == null) {
+                        byte[] stationCopy = Arrays.copyOfRange(b, stationStartIdx, i);
+                        StationKey storedKey = new StationKey(stationCopy, 0, i - stationStartIdx, hash);
+
                         agg = new MeasurementAggregator();
-                        mpp.put(lookupKey, agg);
+                        mpp.put(storedKey, agg);
                     }
 
                     ++i;    // Skip SEMICOLON
 
                     // Parse temperature
-                    boolean isNeg = (b[i] == MINUS);
-                    i += isNeg ? 1 : 0;
-
                     int temp = 0;
-                    while (b[i] != PERIOD) {
-                        temp = temp * 10 + b[i] - ZERO;
-                        ++i;
+                    if (b[i] == MINUS) {
+                        if (b[i + 2] == PERIOD) {
+                            // -x.x
+                            temp = -((b[i + 1] - ZERO) * 10 + (b[i + 3] - ZERO));
+
+                            i += 5;
+                        } else {
+                            // -xx.x
+                            temp = -((b[i + 1] - ZERO) * 100 + (b[i + 2] - ZERO) * 10 + (b[i + 4] - ZERO));
+
+                            i += 6;
+                        }
+                    } else {
+                        if (b[i + 1] == PERIOD) {
+                            // x.x
+                            temp = (b[i] - ZERO) * 10 + (b[i + 2] - ZERO);
+
+                            i += 4;
+                        } else {
+                            // xx.x
+                            temp = (b[i] - ZERO) * 100 + (b[i + 1] - ZERO) * 10 + (b[i + 3] - ZERO);
+
+                            i += 5;
+                        }
                     }
-
-                    ++i;    // Skip PERIOD
-
-                    temp = temp * 10 + b[i] - ZERO;
-
-                    if (isNeg) temp = -temp;
 
                     // Aggregate
                     if (temp < agg.min) agg.min = temp;
                     if (temp > agg.max) agg.max = temp;
                     agg.sum += temp;
                     ++agg.count;
-
-                    i += 2;
                 }
 
                 // Recalculate carryOver and make copy of leftover
@@ -143,7 +160,8 @@ public class CalculateAverage_joyab {
         TreeMap<String, ResultRow> measurements = new TreeMap<>();
         mpp.forEach((key, agg) -> {
             double mean = (double) agg.sum / agg.count;
-            measurements.put(new String(key.bytes, StandardCharsets.UTF_8), new ResultRow(agg.min, mean, agg.max));
+            String station = new String(key.bytes, key.offset, key.len, StandardCharsets.UTF_8);
+            measurements.put(station, new ResultRow(agg.min, mean, agg.max));
         });
 
         long endTime = System.nanoTime();

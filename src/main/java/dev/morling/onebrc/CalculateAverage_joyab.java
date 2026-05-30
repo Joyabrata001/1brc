@@ -21,42 +21,22 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashMap;
 import java.util.TreeMap;
-
-// Time taken: ~1 - 2 mins
-// HashMap in Java is a linked structure under the hood:
-// hash → bucket → Entry object → key object → value object
-//                     ↓
-//               (next Entry) → key → value
-// Each arrow is a pointer dereference = potential cache miss
-// MeasurementAggregator agg = mpp.get(lookupKey);
-// This chain happens on every single row
-//  1. Compute bucket index from hash
-//  2. Load Entry object          ← cache miss (heap pointer)
-//  3. Call equals() on StationKey ← cache miss (another heap pointer)
-//  4. Load MeasurementAggregator  ← cache miss (yet another pointer)
-//  5. Update min/max/sum/count
-// That's 3 potential cache misses per row, on objects scattered randomly across the heap.
-// Also for equals():
-// this.bytes is the shared buffer b — likely in cache. But other.bytes is the stored key's independent copy, allocated at insert time, sitting somewhere random in the heap.
-// So every equals() call that hits a collision loads a cold cache line.
-// 400 entries × (key object + value object + entry object)
-//= ~1200 objects scattered across heap
-//= working set that doesn't fit in L1/L2 cache neatly
-//= random pointer chasing 1B times
 
 public class CalculateAverage_joyab {
 
     private static final String FILE = "./measurements.txt";
     private static final Path path = Paths.get(FILE);
 
-    public static final int MINUS = 45;
-    public static final int PERIOD = 46;
-    public static final int ZERO = 48;
-    public static final int SEMICOLON = 59;
-    public static final int BUFFERSIZE = 1 << 21;
-    public static final int NEWLINE = 10;
+    private static final int MINUS = 45;
+    private static final int PERIOD = 46;
+    private static final int ZERO = 48;
+    private static final int SEMICOLON = 59;
+    private static final int BUFFERSIZE = 1 << 21;
+    private static final int NEWLINE = 10;
+
+    private static final int TABLE_SIZE = 1 << 10;
+    private static final int MASK = TABLE_SIZE - 1;
 
     private record ResultRow(long min, double mean, long max) {
         public String toString() {
@@ -64,56 +44,98 @@ public class CalculateAverage_joyab {
         }
     }
 
-    private static class StationKey {
-        byte[] bytes;
-        int offset;
+    private static final class Station {
+        byte[] name;
         int len;
         int hash;
 
-        @Override
-        public int hashCode() {
-            return this.hash;
-        }
+        long min;
+        long max;
+        long sum;
+        long count;
+    }
 
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) return true;
-            if (!(obj instanceof StationKey other)) return false;
-            if (this.len != other.len) return false;
+    private static final class CustomHashMap {
+        static Station[] table = new Station[TABLE_SIZE];
+
+        // For stats
+        static long collisionCount = 0;
+        static long lookupCount = 0;
+        static long maxProbeLength = 0;
+        static long totalProbeLength = 0;
+
+        public static boolean stationEquals(byte[] stored, byte[] curr, int offset, int len) {
+            if (stored.length != len) return false;
 
             for (int i = 0; i < len; i++) {
-                if (this.bytes[offset + i] != other.bytes[other.offset + i]) return false;
+                if (stored[i] != curr[offset + i]) return false;
             }
+
             return true;
         }
 
-        public StationKey(byte[] bytes, int offset, int len, int hash) {
-            this.bytes = bytes;
-            this.offset = offset;
-            this.len = len;
-            this.hash = hash;
-        }
-    }
+        public static Station findOrCreate(byte[] buffer, int offset, int len, int hash) {
+            ++lookupCount;
 
-    private static class MeasurementAggregator {
-        private long min = Long.MAX_VALUE;
-        private long max = Long.MIN_VALUE;
-        private long sum;
-        private long count;
+            int idx = hash & MASK;
+            long probeLength = 0;
+
+            while (true) {
+                Station s = table[idx];
+
+                if (s == null) {
+                    byte[] name = new byte[len];
+                    System.arraycopy(buffer, offset, name, 0, len);
+
+                    s = new Station();
+
+                    s.name = name;
+                    s.len = len;
+                    s.hash = hash;
+
+                    s.min = Long.MAX_VALUE;
+                    s.max = Long.MIN_VALUE;
+
+                    table[idx] = s;
+
+                    totalProbeLength += probeLength;
+                    if (probeLength > maxProbeLength) maxProbeLength = probeLength;
+
+                    return s;
+                }
+
+                if (s.hash == hash && stationEquals(s.name, buffer, offset, len)) {
+                    totalProbeLength += probeLength;
+                    if (probeLength > maxProbeLength) maxProbeLength = probeLength;
+
+                    return s;
+                }
+
+                idx = (idx + 1) & MASK;
+
+                ++probeLength;
+                ++collisionCount;
+            }
+        }
+
+        public static int usedBuckets() {
+            int used = 0;
+
+            for (Station station : table) {
+                if (station != null) used++;
+            }
+
+            return used;
+        }
     }
 
     public static void main(String[] args) throws IOException {
         long startTime = System.nanoTime();
 
-        HashMap<StationKey, MeasurementAggregator> mpp = new HashMap<>();
-
         try (FileInputStream fis = new FileInputStream(path.toFile())) {
             byte[] b = new byte[BUFFERSIZE];
             int carryOver = 0;
             int bytesRead;
-
-            StationKey lookupKey = new StationKey(b, -1, -1, -1);
-            lookupKey.bytes = b;
 
             while ((bytesRead = fis.read(b, carryOver, BUFFERSIZE - carryOver)) != -1) {
                 int totBytesRead = bytesRead + carryOver;
@@ -133,20 +155,7 @@ public class CalculateAverage_joyab {
                         ++i;
                     }
 
-                    lookupKey.offset = stationStartIdx;
-                    lookupKey.len = i - stationStartIdx;
-                    lookupKey.hash = hash;
-
-                    MeasurementAggregator agg = mpp.get(lookupKey);
-
-                    if (agg == null) {
-                        byte[] stationCopy = new byte[i - stationStartIdx];
-                        System.arraycopy(b, stationStartIdx, stationCopy, 0, i - stationStartIdx);
-                        StationKey storedKey = new StationKey(stationCopy, 0, i - stationStartIdx, hash);
-
-                        agg = new MeasurementAggregator();
-                        mpp.put(storedKey, agg);
-                    }
+                    Station station = CustomHashMap.findOrCreate(b, stationStartIdx, i - stationStartIdx, hash);
 
                     ++i;    // Skip SEMICOLON
 
@@ -179,10 +188,10 @@ public class CalculateAverage_joyab {
                     }
 
                     // Aggregate
-                    if (temp < agg.min) agg.min = temp;
-                    if (temp > agg.max) agg.max = temp;
-                    agg.sum += temp;
-                    ++agg.count;
+                    if (temp < station.min) station.min = temp;
+                    if (temp > station.max) station.max = temp;
+                    station.sum += temp;
+                    ++station.count;
                 }
 
                 // Recalculate carryOver and make copy of leftover
@@ -194,11 +203,12 @@ public class CalculateAverage_joyab {
         }
 
         TreeMap<String, ResultRow> measurements = new TreeMap<>();
-        mpp.forEach((key, agg) -> {
-            double mean = (double) agg.sum / agg.count;
-            String station = new String(key.bytes, key.offset, key.len, StandardCharsets.UTF_8);
-            measurements.put(station, new ResultRow(agg.min, mean, agg.max));
-        });
+        for (Station station : CustomHashMap.table) {
+            if (station == null) continue;
+
+            double mean = (double) station.sum / station.count;
+            measurements.put(new String(station.name, StandardCharsets.UTF_8), new ResultRow(station.min, mean, station.max));
+        }
 
         long endTime = System.nanoTime();
 
@@ -211,5 +221,76 @@ public class CalculateAverage_joyab {
         long millis = (durationNs / 1_000_000) % 1000;
 
         System.out.printf("Logic only: %d min %d sec %d ms%n", minutes, seconds, millis);
+
+        int usedBuckets = CustomHashMap.usedBuckets();
+
+        System.out.println("----- Hash Table Stats -----");
+        System.out.printf("Table Size      : %d\n", TABLE_SIZE);
+        System.out.printf("Used Buckets    : %d\n", usedBuckets);
+        System.out.printf("Load Factor     : %f\n", ((double) usedBuckets / TABLE_SIZE));
+        System.out.printf("Lookups         : %d\n", CustomHashMap.lookupCount);
+        System.out.printf("Collisions      : %d\n", CustomHashMap.collisionCount);
+        System.out.printf("Max Probe Len   : %d\n", CustomHashMap.maxProbeLength);
+        System.out.printf("Avg Probe Len   : %f\n", ((double) CustomHashMap.totalProbeLength / CustomHashMap.lookupCount));
     }
 }
+
+//  ----- Hash Table Stats -----
+//  Table Size      : 1024
+//  Used Buckets    : 413
+//  Load Factor     : 0.403320
+//  Lookups         : 1000000000
+//  Collisions      : 355907879
+//  Max Probe Len   : 8
+//  Avg Probe Len   : 0.355908
+//
+//  === EXECUTION FINISHED ===
+//  Time Taken: 216.786 seconds / 89.392 seconds / 89.578 seconds
+
+// ----- Hash Table Stats -----
+// Table Size      : 4096
+// Used Buckets    : 413
+// Load Factor     : 0.100830
+// Lookups         : 1000000000
+// Collisions      : 36314025
+// Max Probe Len   : 2
+// Avg Probe Len   : 0.036314
+//
+// === EXECUTION FINISHED ===
+// Time Taken: 83.777 seconds
+
+// ----- Hash Table Stats -----
+// Table Size      : 16384
+// Used Buckets    : 413
+// Load Factor     : 0.025208
+// Lookups         : 1000000000
+// Collisions      : 12105654
+// Max Probe Len   : 1
+// Avg Probe Len   : 0.012106
+//
+// === EXECUTION FINISHED ===
+// Time Taken: 86.812 seconds
+
+// ----- Hash Table Stats -----
+// Table Size      : 65536
+// Used Buckets    : 413
+// Load Factor     : 0.006302
+// Lookups         : 1000000000
+// Collisions      : 4843108
+// Max Probe Len   : 1
+// Avg Probe Len   : 0.004843
+//
+// === EXECUTION FINISHED ===
+// Time Taken: 68.398 seconds / 51.373 seconds
+
+// ----- Hash Table Stats -----
+// Table Size      : 131072
+// Used Buckets    : 413
+// Load Factor     : 0.003151
+// Lookups         : 1000000000
+// Collisions      : 0
+// Max Probe Len   : 0
+// Avg Probe Len   : 0.000000
+//
+// === EXECUTION FINISHED ===
+// Time Taken: 84.596 seconds

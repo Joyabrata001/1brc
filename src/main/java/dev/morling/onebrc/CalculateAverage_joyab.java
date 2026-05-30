@@ -25,8 +25,26 @@ import java.util.HashMap;
 import java.util.TreeMap;
 
 // Time taken: ~1 - 2 mins
-// Allocated classes drops from approx 75 to 2
-// GC pressure reduces
+// HashMap in Java is a linked structure under the hood:
+// hash → bucket → Entry object → key object → value object
+//                     ↓
+//               (next Entry) → key → value
+// Each arrow is a pointer dereference = potential cache miss
+// MeasurementAggregator agg = mpp.get(lookupKey);
+// This chain happens on every single row
+//  1. Compute bucket index from hash
+//  2. Load Entry object          ← cache miss (heap pointer)
+//  3. Call equals() on StationKey ← cache miss (another heap pointer)
+//  4. Load MeasurementAggregator  ← cache miss (yet another pointer)
+//  5. Update min/max/sum/count
+// That's 3 potential cache misses per row, on objects scattered randomly across the heap.
+// Also for equals():
+// this.bytes is the shared buffer b — likely in cache. But other.bytes is the stored key's independent copy, allocated at insert time, sitting somewhere random in the heap.
+// So every equals() call that hits a collision loads a cold cache line.
+// 400 entries × (key object + value object + entry object)
+//= ~1200 objects scattered across heap
+//= working set that doesn't fit in L1/L2 cache neatly
+//= random pointer chasing 1B times
 
 public class CalculateAverage_joyab {
 

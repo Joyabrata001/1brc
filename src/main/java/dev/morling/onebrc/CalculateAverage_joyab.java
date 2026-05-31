@@ -104,7 +104,7 @@ public class CalculateAverage_joyab {
                     return s;
                 }
 
-                if (s.hash == hash && stationEquals(s.name, buffer, offset, len)) {
+                if (s.hash == hash && s.len == len && stationEquals(s.name, buffer, offset, len)) {
                     totalProbeLength += probeLength;
                     if (probeLength > maxProbeLength) maxProbeLength = probeLength;
 
